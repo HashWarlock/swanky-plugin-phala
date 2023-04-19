@@ -49,6 +49,16 @@ export function pickLanguage(): ListQuestion<Answers> {
     name: "contractLanguage",
     type: "list",
     choices: ["pink"],
-    message: "Which contract template should we use?",
+    message: "Which contract language should we use?",
   };
+}
+
+export function password(initial?: string, questionText?: string): Question<Answers> {
+  const question: Question = {
+    name: "password",
+    type: "input",
+    message: questionText || "Account passphrase (leave empty if to save as plain text)",
+  };
+  if (initial) question.default = initial;
+  return question;
 }

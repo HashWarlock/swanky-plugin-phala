@@ -1,22 +1,23 @@
-import {Args, Command, Flags} from '@oclif/core'
-import {
-  checkCliDependencies,
-  copyTemplateFiles,
-  installDeps,
-  processTemplates,
-} from "../../lib/tasks";
-import {Spinner} from "../../lib/spinner";
+import {Command, Args} from '@oclif/core'
 import {paramCase, pascalCase, snakeCase} from "change-case";
 import inquirer from 'inquirer';
 
-import {email, name, pickLanguage, pickTemplate} from "../../lib/prompts";
+import {email, name, pickLanguage, pickTemplate} from "../../../lib/prompts";
 import execa from 'execa'
 import {readdirSync} from "node:fs";
-import {Initializer, RunMode, RuntimeContext} from '@devphase/service';
+import {RunMode, RuntimeContext} from '@devphase/service';
 import path = require("node:path");
+import {
+  checkCliDependencies,
+  copyTemplateFiles,
+  processTemplates,
+} from '../../../lib/tasks';
+import {Spinner} from '../../../lib/spinner';
+import {ensureDir, pathExistsSync} from "fs-extra";
+
 
 export function getTemplates(language = "pink") {
-  const templatesPath = path.resolve(__dirname, "../..", "templates");
+  const templatesPath = path.resolve(__dirname, "../../..", "templates");
   const contractTemplatesPath = path.resolve(templatesPath, "contracts", language);
   const fileList = readdirSync(contractTemplatesPath, {
     withFileTypes: true,
@@ -31,37 +32,37 @@ export function getTemplates(language = "pink") {
   return { templatesPath, contractTemplatesPath, contractTemplatesList };
 }
 
-export default class PhalaInit extends Command {
-  static description = 'Generate a new Phat Contract environment'
+export default class PhalaContractNew extends Command {
+  static description = 'Creates new contract from template'
 
   static examples = [
-    '<%= config.bin %> <%= command.id %> [projectName]',
+    '<%= config.bin %> <%= command.id %>',
   ]
 
-  static flags = {
-    verbose: Flags.boolean({ char: "v" }),
-  };
-
   static args = {
-    projectName: Args.string({
-      name: "projectName",
+    contractName: Args.string({
+      name: "contractName",
       required: true,
-      description: "directory name of new project",
+      description: "Name of the new contract",
     }),
   };
 
   public async run(): Promise<void> {
-    const { args, flags } = await this.parse(PhalaInit);
+    const {args} = await this.parse(PhalaContractNew);
+    const runtimeContext = await RuntimeContext.getSingleton();
+    await runtimeContext.initContext(RunMode.Simple);
+    await runtimeContext.requestProjectDirectory();
 
-    const projectPath = path.resolve(args.projectName);
+    const projectPath = path.resolve();
 
+    this.log(`Creating new Phat Contract`);
     const { contractLanguage } = await inquirer.prompt([pickLanguage()]);
 
     const templates = getTemplates();
 
     const questions = [
       pickTemplate(templates.contractTemplatesList),
-      name("contract", (ans) => ans.contractTemplate, "What should we name your contract?"),
+      name("contract", () => args.contractName, "What should we name your contract?"),
       name(
         "author",
         () => execa.commandSync("git config --get user.name").stdout,
@@ -72,7 +73,13 @@ export default class PhalaInit extends Command {
 
     const answers = await inquirer.prompt(questions);
 
-    const spinner = new Spinner(flags.verbose);
+    if (
+      pathExistsSync(path.join(projectPath, "contracts", answers.contractName))
+    ) {
+      throw new Error(`Contract folder '${answers.contractName}' already exists`);
+    }
+
+    const spinner = new Spinner(false);
 
     await spinner.runCommand(() => checkCliDependencies(spinner), "Checking dependencies");
 
@@ -92,7 +99,7 @@ export default class PhalaInit extends Command {
     await spinner.runCommand(
       () =>
         processTemplates(projectPath, {
-          project_name: paramCase(args.projectName),
+          project_name: paramCase(this.config.pjson.name),
           author_name: answers.authorName,
           author_email: answers.email,
           swanky_version: this.config.pjson.version,
@@ -104,35 +111,10 @@ export default class PhalaInit extends Command {
       "Processing templates"
     );
 
-    await spinner.runCommand(
-      () => execa.command("git init", { cwd: projectPath }),
-      "Initializing git"
-    );
+    await ensureDir(path.resolve(projectPath, "stacks", answers.contractName));
+    await ensureDir(path.resolve(projectPath, "test", answers.contractName));
 
-    await spinner.runCommand(
-      () => installDeps(projectPath),
-      "Installing dependencies",
-      "",
-      "",
-      false
-    );
-
-    // Change current directory to the project path
-    process.chdir(projectPath);
-    const runtimeContext = await RuntimeContext.getSingleton();
-    await runtimeContext.initContext(RunMode.Simple);
-
-    const initializer = new Initializer(runtimeContext);
-    await spinner.runCommand(
-      async () => await initializer.init(),
-      "Copying devphase config files",
-    );
-
-    await spinner.runCommand(
-      async () => await runtimeContext.requestStackBinaries(true),
-      "Installing phala node, pruntime and pherry binaries",
-    );
-
-    this.log("😎 Phat Contract project successfully initialised! 😎");
+    this.log(`😎 Successfully created new Phat Contract! 😎`);
   }
 }
+
